@@ -51,6 +51,12 @@ cd services/buyer-api
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
 pytest -q
+
+# integration tests (real Postgres + the real built buyer-api image; see below)
+cd /path/to/dynamicsserver   # repo root
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r tests/integration/requirements.txt
+./scripts/integration-test.sh
 ```
 
 No linter is set up yet.
@@ -74,6 +80,27 @@ To simulate a DB-level failure (e.g. the constraint-violation branch in `create_
 reconstructs the same `exc.orig.__cause__`-with-`.constraint_name` chain asyncpg produces (see
 "Integrity-error handling pattern" below) — this is what regression-tests the duplicate-email-vs-other-
 constraint mislabeling bug.
+
+### Integration tests use a real Postgres and the real built image
+
+`tests/integration/` (top-level, since it exercises the whole running stack rather than importable code)
+is a black-box suite: `scripts/integration-test.sh` brings up `docker-compose.test.yml` — a standalone
+compose file (not a `docker-compose.yml` override, to sidestep Compose's list-merge rules for
+`ports`/`volumes`) on ports 5433/8001 so it can run alongside a dev stack already on 5432/8000 — waits for
+`/health`, runs pytest against the real HTTP service and, for a couple of DB-only checks, a direct
+`psycopg` connection, then always tears the stack down (`trap ... down -v`), even on failure. Postgres's
+data dir is `tmpfs`, so every run applies `db/init/*.sql` from scratch; there's no volume left behind to
+clean up. This is what proves things the unit suite's `FakeSession` structurally cannot: that the real
+asyncpg exception shape matches what `routers/users.py` unwraps, and — the most important one — that the
+"clear the old default before setting a new one" logic in `routers/addresses.py` actually satisfies the
+real `one_default_address_per_user` partial unique index rather than just the mock's dict.
+
+An autouse fixture in `tests/integration/conftest.py` truncates `users`/`addresses`/`payment_methods`
+before every test, so tests don't need to worry about state left by earlier tests in the same run.
+
+The same script is meant to become the Jenkins post-deploy smoke test in phase 6 of the roadmap — pointed
+at a real deploy's `BASE_URL`/`DATABASE_URL` instead of localhost, the test files themselves shouldn't need
+to change.
 
 ### Exposing a service to external tools (Postman, etc.) from this Codespace
 

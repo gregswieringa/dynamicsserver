@@ -1,0 +1,37 @@
+# Standalone (not an override of docker-compose.yml) so there's no ambiguity
+# about Compose's list-merge rules for ports/volumes. Run alone via
+# `docker compose -f docker-compose.test.yml ...` — see scripts/integration-test.sh.
+#
+# Different host ports (5433/8001) so this can run alongside a dev stack
+# already up on 5432/8000. Postgres data dir is tmpfs: every run starts from
+# a truly fresh schema (db/init/*.sql applies from scratch every time) and
+# there's nothing left behind after teardown. No app bind-mount/--reload:
+# this tests the actual built image, not the host working tree.
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: buyer
+      POSTGRES_PASSWORD: buyer
+      POSTGRES_DB: marketplace
+    ports:
+      - "5433:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    volumes:
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U buyer -d marketplace"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  buyer-api:
+    build: ./services/buyer-api
+    environment:
+      DATABASE_URL: postgresql+asyncpg://buyer:buyer@postgres:5432/marketplace
+    ports:
+      - "8001:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy

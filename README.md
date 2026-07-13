@@ -25,3 +25,25 @@ Endpoints:
 - `POST /users/{id}/addresses`, `GET /users/{id}/addresses`, `POST /users/{id}/addresses/{address_id}/set-default`
 
 `payment_methods` exists in the schema but has no API yet — next up once checkout enters the picture.
+
+## Tests
+
+### Unit tests (mocked DB, no Postgres needed)
+
+```bash
+cd services/buyer-api
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements-dev.txt
+pytest -q
+```
+
+### Integration tests (real Postgres + the real built image)
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate   # from the repo root
+pip install -r tests/integration/requirements.txt
+./scripts/integration-test.sh
+```
+
+Spins up an isolated Postgres + buyer-api via `docker-compose.test.yml` (ports 5433/8001, so it won't
+clash with a dev stack on 5432/8000), runs the suite, and tears everything down afterward — pass or fail.
