@@ -9,10 +9,13 @@ USER root
 
 # docker CLI + compose plugin (for driving the host daemon), python3 (the
 # buyer-api unit test stage builds its own venv per build), curl (health
-# checks in scripts/deploy.sh / scripts/integration-test.sh).
+# checks in scripts/deploy.sh / scripts/integration-test.sh), gcc + Postgres
+# headers (requirements.txt's asyncpg pin predates this base image's python3,
+# so pip has no pre-built wheel for it and must compile the C extension --
+# hit this for real on the first build against a freshly provisioned VM).
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        ca-certificates curl gnupg python3 python3-venv && \
+        ca-certificates curl gnupg python3 python3-venv gcc libpq-dev python3-dev && \
     install -m 0755 -d /etc/apt/keyrings && \
     curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg && \
     chmod a+r /etc/apt/keyrings/docker.gpg && \
