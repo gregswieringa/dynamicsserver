@@ -8,16 +8,20 @@ FROM jenkins/jenkins:lts-jdk17
 USER root
 
 # docker CLI + compose plugin (for driving the host daemon) and curl
-# (health checks in scripts/deploy.sh / scripts/integration-test.sh). No
-# python3 here on purpose: the unit test stage runs inside
-# services/buyer-api/Dockerfile.test (python:3.12-slim, matching the real
-# Dockerfile) rather than directly on the Jenkins agent -- this image's own
-# python3 wouldn't match, and requirements.txt's asyncpg pin genuinely
-# doesn't build against newer CPython C API changes (not just a missing-
-# wheel problem -- hit this for real, twice, before landing on that fix).
+# (health checks in scripts/deploy.sh / scripts/integration-test.sh).
+#
+# python3 + python3-venv ARE needed here, despite the Unit tests stage
+# deliberately avoiding this image's python3 (see services/buyer-api/
+# Dockerfile.test's header -- that's specifically because requirements.txt's
+# asyncpg pin doesn't build against this image's newer CPython). Integration
+# tests are different: scripts/integration-test.sh's own `python3 -m pytest
+# tests/integration` runs directly on whatever host calls it, and
+# tests/integration/requirements.txt (pytest, httpx, psycopg[binary]) has no
+# such version lock -- psycopg[binary] ships prebuilt wheels, no compiler
+# needed, verified directly against this same base image before adding it.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        ca-certificates curl gnupg && \
+        ca-certificates curl gnupg python3 python3-venv && \
     install -m 0755 -d /etc/apt/keyrings && \
     curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg && \
     chmod a+r /etc/apt/keyrings/docker.gpg && \

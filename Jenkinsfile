@@ -42,15 +42,24 @@ pipeline {
 
         stage('Integration tests') {
             steps {
-                // Builds services/buyer-api and db/ into
-                // buyerapi-it-buyer-api:latest / buyerapi-it-postgres:latest
-                // (via docker-compose.test.yml), runs the suite against a
-                // real Postgres, tears the stack down. `down -v` removes
+                // scripts/integration-test.sh's own `python3 -m pytest
+                // tests/integration` runs directly on whatever host calls
+                // it (unlike the unit tests above), so set up the same venv
+                // CLAUDE.md tells a human to create locally -- the Jenkins
+                // agent doesn't have one already. This also builds
+                // services/buyer-api and db/ into buyerapi-it-buyer-api:latest
+                // / buyerapi-it-postgres:latest (via docker-compose.test.yml)
+                // and tests them against a real Postgres; `down -v` removes
                 // containers/volumes/network but not the images, so both
                 // stay in the local Docker daemon's cache for the Push
                 // stage below -- build once, test that exact artifact,
                 // deploy that exact artifact.
-                sh './scripts/integration-test.sh'
+                sh '''
+                    python3 -m venv .venv-it
+                    . .venv-it/bin/activate
+                    pip install -q -r tests/integration/requirements.txt
+                    ./scripts/integration-test.sh
+                '''
             }
         }
 
