@@ -2,6 +2,17 @@
 # jenkins/Dockerfile's header for why it needs the host's docker.sock
 # mounted in (Docker-outside-of-Docker) rather than running Docker nested.
 #
+# network_mode: host is required, not optional: Jenkinsfile stages curl
+# `localhost:<port>` to health-check sibling containers (postgres/buyer-api)
+# that the *host* Docker daemon started and published ports for. Without
+# host networking, Jenkins has its own isolated network namespace -- its
+# "localhost" is private to itself, so those curls silently hit nothing
+# (confirmed directly: curl from the VM's own shell got a real response,
+# the identical curl from inside the default-networked Jenkins container
+# got connection failures) even though the containers were healthy the
+# whole time. Host networking makes Jenkins share the VM's real network
+# stack, the same as running these commands directly on the VM would.
+#
 # jenkins_home persists Jenkins' own state (jobs, plugins, credentials)
 # across container recreation. deploy_env is a *separate* persistent volume
 # holding deploy/staging.env and deploy/prod.env with real secrets --
@@ -17,8 +28,7 @@ services:
       context: ./jenkins
       args:
         DOCKER_GID: ${DOCKER_GID:-999}
-    ports:
-      - "8080:8080"
+    network_mode: host
     volumes:
       - jenkins_home:/var/jenkins_home
       - deploy_env:/var/jenkins_home/deploy-env
