@@ -1,0 +1,30 @@
+# Jenkins, meant to run on the same Oracle VM as staging/prod. See
+# jenkins/Dockerfile's header for why it needs the host's docker.sock
+# mounted in (Docker-outside-of-Docker) rather than running Docker nested.
+#
+# jenkins_home persists Jenkins' own state (jobs, plugins, credentials)
+# across container recreation. deploy_env is a *separate* persistent volume
+# holding deploy/staging.env and deploy/prod.env with real secrets --
+# deliberately outside any git checkout, so it survives independently of
+# Jenkins' per-job workspace churn (see CLAUDE.md's "CI/CD (Jenkins)"
+# section for how those files get there the first time).
+#
+# Before building: run `getent group docker` on the VM and pass that GID:
+#   DOCKER_GID=$(getent group docker | cut -d: -f3) docker compose -f docker-compose.jenkins.yml up -d --build
+services:
+  jenkins:
+    build:
+      context: ./jenkins
+      args:
+        DOCKER_GID: ${DOCKER_GID:-999}
+    ports:
+      - "8080:8080"
+    volumes:
+      - jenkins_home:/var/jenkins_home
+      - deploy_env:/var/jenkins_home/deploy-env
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+
+volumes:
+  jenkins_home:
+  deploy_env:

@@ -98,9 +98,62 @@ real `one_default_address_per_user` partial unique index rather than just the mo
 An autouse fixture in `tests/integration/conftest.py` truncates `users`/`addresses`/`payment_methods`
 before every test, so tests don't need to worry about state left by earlier tests in the same run.
 
-The same script is meant to become the Jenkins post-deploy smoke test in phase 6 of the roadmap — pointed
-at a real deploy's `BASE_URL`/`DATABASE_URL` instead of localhost, the test files themselves shouldn't need
-to change.
+`Jenkinsfile`'s "Integration tests" stage runs this same script in CI — see "CI/CD (Jenkins)" below.
+
+### CI/CD (Jenkins)
+
+Pulling phase 6 of the roadmap forward early, ahead of splitting into more services: a `Jenkinsfile`
+(Multibranch Pipeline) runs on every branch/PR and additionally deploys on `main`. Jenkins itself runs as
+a container (`jenkins/Dockerfile` + `docker-compose.jenkins.yml`) on the same Oracle Free Tier VM as
+staging and production, so deploys are a direct `sh` step in the pipeline, not SSH to a separate host.
+
+**Environments and ports** — one VM hosts staging and production as separate Compose projects
+(`-p buyerapi-staging` / `-p buyerapi-prod`), isolated from each other via Compose's per-project
+networks/volumes, same as `docker-compose.test.yml` already does for CI:
+
+| environment | compose file                  | postgres port      | buyer-api port | builds or pulls?        |
+|-------------|--------------------------------|--------------------|-----------------|--------------------------|
+| dev         | `docker-compose.yml`           | 5432                | 8000            | builds from source, `--reload` |
+| test (CI)   | `docker-compose.test.yml`      | 5433                | 8001            | builds from `db/` + `services/buyer-api`, tmpfs DB |
+| staging     | `docker-compose.staging.yml`   | 5434 (loopback only)| 8081            | pulls `ghcr.io/gregswieringa/buyer-api(-postgres):<tag>` |
+| production  | `docker-compose.prod.yml`      | 5435 (loopback only)| 8082            | pulls the same tag staging ran |
+
+Postgres in staging/prod is bound to `127.0.0.1` only — buyer-api reaches it over the Compose network,
+but it's never exposed on the VM's public IP.
+
+**Schema is baked into an image, not bind-mounted** — `db/Dockerfile` (`FROM postgres:16`, `COPY init/
+/docker-entrypoint-initdb.d/`) replaces the bind-mount of `./db/init` that dev still uses. This matters
+because Jenkins runs `docker build`/`docker compose` from *inside* its own container by mounting the
+host's `/var/run/docker.sock` (Docker-outside-of-Docker — no nested Docker daemon); the host daemon it's
+driving would resolve a bind-mounted relative path against the *host's* filesystem, not Jenkins'
+container filesystem, so `./db/init` would silently mount empty. Building it into the image sidesteps
+that — `docker build` streams its context over the API, so it works regardless of which filesystem
+namespace invoked it. Verified this directly: ran `docker compose -f docker-compose.test.yml up` from a
+throwaway container with the repo copied into its own filesystem only (nothing bind-mounted, nothing at
+that path on the real host) and confirmed the schema still loaded correctly.
+
+**Build once, deploy the same artifacts everywhere** — the Jenkinsfile does *not* rebuild for
+staging/prod. `scripts/integration-test.sh` already builds `buyerapi-it-buyer-api:latest` and
+`buyerapi-it-postgres:latest` via `docker-compose.test.yml` and tests them against each other for real;
+`docker compose down -v` removes containers/volumes/network but leaves both images in the Docker
+daemon's cache, so the Push stage just `docker tag`s and pushes the exact images that passed integration
+tests. Staging and (on approval) production both deploy that same tag — never a fresh build — via
+`scripts/deploy.sh <staging|prod> <tag>`, which does `docker compose pull` + `up -d` + polls `/health`.
+
+**Secrets** — `deploy/staging.env` and `deploy/prod.env` (gitignored, different Postgres passwords each)
+must exist before `deploy.sh` will run; it refuses otherwise. `deploy/*.env.example` are the templates.
+Since Jenkins re-clones its job workspace per build, these live outside it: `docker-compose.jenkins.yml`
+mounts a separate persistent `deploy_env` volume at `/var/jenkins_home/deploy-env`, and the Jenkinsfile
+points `DEPLOY_ENV_DIR` there. Populate that volume once, by hand (e.g. `docker compose cp` the real
+files in, or exec into the Jenkins container and write them), after Jenkins is first stood up.
+
+**One-time Jenkins/VM setup this assumes** (not yet done — this is the next step now that the Oracle VM
+exists): install Docker on the VM; find its docker group GID (`getent group docker`) and build Jenkins
+with `DOCKER_GID=<that value> docker compose -f docker-compose.jenkins.yml up -d --build`; populate the
+`deploy_env` volume with real `staging.env`/`prod.env`; create the Jenkins `ghcr-credentials` credential
+(a GitHub username + PAT with `write:packages`); create the Multibranch Pipeline job pointed at this
+repo; add a GitHub webhook pointed at Jenkins; and add branch protection on `main` requiring the Jenkins
+PR check to pass.
 
 ### Exposing a service to external tools (Postman, etc.) from this Codespace
 
@@ -118,9 +171,19 @@ gh codespace ports visibility 8000:private -c "$CODESPACE_NAME"   # revert when 
 ### Layout
 
 ```
-db/init/*.sql              # schema source of truth, applied via postgres docker-entrypoint-initdb.d
-services/<name>-api/       # one FastAPI service per bounded context; buyer-api is the first
-docker-compose.yml         # wires postgres + all services together
+db/init/*.sql                  # schema source of truth, applied via postgres docker-entrypoint-initdb.d
+db/Dockerfile                  # bakes db/init/*.sql into an image (used by test/staging/prod, not dev)
+services/<name>-api/           # one FastAPI service per bounded context; buyer-api is the first
+docker-compose.yml             # dev stack (builds from source, bind-mounted db/init, --reload)
+docker-compose.test.yml        # CI/local integration-test stack (builds db/ + services/buyer-api, tmpfs DB)
+docker-compose.staging.yml     # staging deploy target (pulls built images)
+docker-compose.prod.yml        # production deploy target (pulls the same tags staging ran)
+docker-compose.jenkins.yml     # Jenkins-as-a-container, driving the host's Docker daemon
+jenkins/Dockerfile              # Jenkins image: docker CLI + compose plugin + python3
+deploy/*.env.example           # templates for the real (gitignored) deploy/staging.env, deploy/prod.env
+scripts/integration-test.sh    # builds + runs tests/integration/ against docker-compose.test.yml
+scripts/deploy.sh              # deploys built tags to staging or prod
+Jenkinsfile                    # Multibranch Pipeline: test on every branch, deploy on main
 ```
 
 Each future service gets its own directory under `services/`, its own Dockerfile, and joins the

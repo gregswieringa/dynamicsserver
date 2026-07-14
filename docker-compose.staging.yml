@@ -1,0 +1,38 @@
+# Deploy target, not a build target: unlike docker-compose.yml/.test.yml,
+# this pulls pre-built images from GHCR rather than building from source —
+# the whole point of the pipeline is "build once in CI, deploy that exact
+# artifact everywhere." Meant to run on the Oracle VM via scripts/deploy.sh,
+# not on a dev machine. Ports/credentials/tag come from deploy/staging.env
+# (copy deploy/staging.env.example there and fill in real values — never
+# commit the real file).
+services:
+  postgres:
+    image: ghcr.io/gregswieringa/buyer-api-postgres:${IMAGE_TAG}
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT}:5432"   # loopback only -- never expose the DB port publicly
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  buyer-api:
+    image: ghcr.io/gregswieringa/buyer-api:${IMAGE_TAG}
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    ports:
+      - "${BUYER_API_PORT}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:

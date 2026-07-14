@@ -7,9 +7,14 @@
 # a truly fresh schema (db/init/*.sql applies from scratch every time) and
 # there's nothing left behind after teardown. No app bind-mount/--reload:
 # this tests the actual built image, not the host working tree.
+#
+# postgres builds from db/Dockerfile (init SQL baked in) rather than a bind
+# mount of ./db/init — see db/Dockerfile's header for why: this suite also
+# runs from inside the Jenkins container via Docker-outside-of-Docker, where
+# a bind-mounted relative path would resolve against the wrong filesystem.
 services:
   postgres:
-    image: postgres:16
+    build: ./db
     environment:
       POSTGRES_USER: buyer
       POSTGRES_PASSWORD: buyer
@@ -18,8 +23,6 @@ services:
       - "5433:5432"
     tmpfs:
       - /var/lib/postgresql/data
-    volumes:
-      - ./db/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U buyer -d marketplace"]
       interval: 2s

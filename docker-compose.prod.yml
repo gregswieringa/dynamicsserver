@@ -1,0 +1,36 @@
+# Intentionally near-identical to docker-compose.staging.yml — same image,
+# same shape, different environment. That sameness is the point: promotion
+# means re-deploying the exact tag that was already running in staging, not
+# rebuilding for prod. See docker-compose.staging.yml's header for the rest
+# of the rationale (pull-only, deploy-only, driven by deploy/prod.env).
+services:
+  postgres:
+    image: ghcr.io/gregswieringa/buyer-api-postgres:${IMAGE_TAG}
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT}:5432"   # loopback only -- never expose the DB port publicly
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  buyer-api:
+    image: ghcr.io/gregswieringa/buyer-api:${IMAGE_TAG}
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    ports:
+      - "${BUYER_API_PORT}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
