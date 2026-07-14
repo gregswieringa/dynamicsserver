@@ -28,14 +28,15 @@ pipeline {
     stages {
         stage('Unit tests') {
             steps {
-                dir('services/buyer-api') {
-                    sh '''
-                        python3 -m venv .venv
-                        . .venv/bin/activate
-                        pip install -q -r requirements-dev.txt
-                        pytest -q
-                    '''
-                }
+                // Runs inside services/buyer-api/Dockerfile.test (python:3.12-slim,
+                // matching the real Dockerfile) rather than a venv on the Jenkins
+                // agent directly -- Jenkins' own python3 (Debian trixie's default,
+                // 3.13) can't even compile asyncpg's C extension against that
+                // version's C API. See Dockerfile.test's header for the rest.
+                sh '''
+                    docker build -f services/buyer-api/Dockerfile.test -t buyer-api-unittest:${IMAGE_TAG} services/buyer-api
+                    docker run --rm buyer-api-unittest:${IMAGE_TAG}
+                '''
             }
         }
 

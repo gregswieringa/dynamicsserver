@@ -7,15 +7,17 @@ FROM jenkins/jenkins:lts-jdk17
 
 USER root
 
-# docker CLI + compose plugin (for driving the host daemon), python3 (the
-# buyer-api unit test stage builds its own venv per build), curl (health
-# checks in scripts/deploy.sh / scripts/integration-test.sh), gcc + Postgres
-# headers (requirements.txt's asyncpg pin predates this base image's python3,
-# so pip has no pre-built wheel for it and must compile the C extension --
-# hit this for real on the first build against a freshly provisioned VM).
+# docker CLI + compose plugin (for driving the host daemon) and curl
+# (health checks in scripts/deploy.sh / scripts/integration-test.sh). No
+# python3 here on purpose: the unit test stage runs inside
+# services/buyer-api/Dockerfile.test (python:3.12-slim, matching the real
+# Dockerfile) rather than directly on the Jenkins agent -- this image's own
+# python3 wouldn't match, and requirements.txt's asyncpg pin genuinely
+# doesn't build against newer CPython C API changes (not just a missing-
+# wheel problem -- hit this for real, twice, before landing on that fix).
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        ca-certificates curl gnupg python3 python3-venv gcc libpq-dev python3-dev && \
+        ca-certificates curl gnupg && \
     install -m 0755 -d /etc/apt/keyrings && \
     curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg && \
     chmod a+r /etc/apt/keyrings/docker.gpg && \

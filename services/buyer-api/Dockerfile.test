@@ -1,0 +1,24 @@
+# Standalone image just for running unit tests in CI. Exists because Jenkins
+# runs `docker build`/`docker run` from *inside its own container* (Docker-
+# outside-of-Docker, driving the host daemon via a mounted socket) -- a
+# bind-mounted workspace path would resolve against the host's filesystem,
+# not Jenkins', so it can't just `docker run -v $WORKSPACE:/app python:3.12-
+# slim ...`. Building the workspace into an image sidesteps that (docker
+# build streams its context over the API, so it works regardless of which
+# filesystem namespace invoked it) -- same principle as db/Dockerfile.
+#
+# Also pins the same Python version as the real Dockerfile on purpose:
+# requirements.txt's asyncpg pin predates Python 3.13's C API, so running
+# tests under whatever python3 a CI host happens to default to isn't safe.
+FROM python:3.12-slim
+
+WORKDIR /srv
+
+COPY requirements.txt requirements-dev.txt ./
+RUN pip install --no-cache-dir -r requirements-dev.txt
+
+COPY app ./app
+COPY tests ./tests
+COPY pytest.ini ./
+
+CMD ["pytest", "-q"]
