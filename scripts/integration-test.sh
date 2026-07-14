@@ -24,7 +24,11 @@ echo "--- building and starting test stack ---"
 
 echo "--- waiting for buyer-api health check ---"
 healthy=false
-for _ in $(seq 1 30); do
+# 90 attempts, not 30: on a resource-constrained CI host (e.g. a small VM
+# also running Jenkins itself), Postgres's initdb + schema load + buyer-api
+# startup can genuinely take longer than 30s, especially right after a
+# Docker build was competing for the same CPU. Hit this for real in CI.
+for _ in $(seq 1 90); do
   if curl -sf "$BASE_URL/health" >/dev/null 2>&1; then
     healthy=true
     break

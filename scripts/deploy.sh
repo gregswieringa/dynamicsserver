@@ -45,7 +45,10 @@ IMAGE_TAG="$IMAGE_TAG" "${COMPOSE[@]}" up -d
 
 echo "--- waiting for health check on port ${BUYER_API_PORT} ---"
 healthy=false
-for _ in $(seq 1 30); do
+# See scripts/integration-test.sh's comment on this same loop -- a small
+# resource-constrained VM can genuinely take longer than 30s for Postgres
+# initdb + schema load + buyer-api startup.
+for _ in $(seq 1 60); do
   if curl -sf "http://localhost:${BUYER_API_PORT}/health" >/dev/null 2>&1; then
     healthy=true
     break
