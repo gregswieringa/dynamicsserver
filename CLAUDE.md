@@ -163,7 +163,7 @@ automatically instead of relying on manual scans. **Deliberately not done**: bra
 PR checks on `main` — direct pushes to `main` are fine for now, revisit if this ever needs to look more
 like a team workflow.
 
-### Observability (Loki + Grafana)
+### Observability (Loki + Prometheus + Grafana)
 
 Pulling the logging half of phase 5 forward early, same reasoning as pulling CI/CD forward from phase 6:
 a `docker-compose.observability.yml` runs Loki + Grafana on the same VM as Jenkins/staging/prod.
@@ -196,7 +196,27 @@ so e.g. `{compose_project="buyerapi-prod"}` in Grafana's Explore view shows ever
 (`docker plugin install grafana/loki-docker-driver:latest --alias loki --grant-all-permissions`) before
 any service using `logging: driver: loki` can start; `deploy/observability.env` populated (copy
 `deploy/observability.env.example`, fill in a real Grafana admin password); a Hetzner Cloud Firewall rule
-for TCP 3000 (Grafana's UI) — Loki's own port (3100) stays loopback-only, nothing external needs it.
+for TCP 3000 (Grafana's UI) — Loki's and Prometheus's own ports (3100, 9090) stay loopback-only, nothing
+external needs them directly.
+
+**Metrics** — `services/buyer-api/app/main.py` wires up `prometheus-fastapi-instrumentator`, which exposes
+`/metrics` with zero manual timing code in `routers/`: `http_requests_total{method,handler,status}` (a
+counter) and `http_request_duration_seconds{method,handler}` (a histogram, queried via
+`histogram_quantile()` for per-operation latency percentiles). `observability/prometheus.yml` scrapes it
+directly from staging's and prod's containers over their internal port 8000 (`buyerapi-staging-buyer-api-1:8000`,
+`buyerapi-prod-buyer-api-1:8000`), not the host-published 8081/8082 — this is why Prometheus needs no
+networking workaround the way Jenkins did: `docker-compose.observability.yml` joins Prometheus directly to
+staging's and prod's own Compose networks (external network references), so it's a normal client reaching
+*into* those networks rather than a separate container trying to see host-published ports across a network
+namespace boundary. The `environment` label on each scrape target (`staging`/`prod`) is what lets one
+Grafana dashboard (auto-provisioned from `observability/dashboards/buyer-api.json`, no manual import) show
+both side by side or filtered. Chose a custom instrumentator over deriving counts from Loki log lines —
+Loki was never designed for latency percentiles/histograms, and Prometheus is what this project's own
+roadmap already names for phase 5 alongside Loki.
+
+Unlike the logging setup, this touches **application code** (`main.py`, `requirements.txt`), so it can't be
+hand-applied to the VM the way Loki/Grafana were — it goes through the real pipeline (unit tests,
+integration tests, build, push, staging, manual prod approval) like any other buyer-api change.
 
 ### Simulated production traffic
 

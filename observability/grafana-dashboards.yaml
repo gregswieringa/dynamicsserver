@@ -1,0 +1,13 @@
+# Tells Grafana to auto-load any dashboard JSON file placed in
+# /var/lib/grafana/dashboards (see observability/dashboards/) -- no manual
+# "import dashboard" click-through needed.
+apiVersion: 1
+
+providers:
+  - name: default
+    orgId: 1
+    folder: ""
+    type: file
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards

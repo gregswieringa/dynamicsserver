@@ -11,9 +11,16 @@
 # --grant-all-permissions`), and deploy/observability.env populated (copy
 # deploy/observability.env.example, fill in a real Grafana admin password).
 #
-# Loki is loopback-only (127.0.0.1:3100) -- only this host's own containers
-# ship logs to it, no reason to expose it publicly. Grafana is the one
-# meant to be browsed directly.
+# Loki and Prometheus are loopback-only (127.0.0.1) -- only this host's own
+# containers/Grafana need them, no reason to expose either publicly.
+# Grafana is the one meant to be browsed directly.
+#
+# Prometheus joins staging's and prod's own Compose networks (external
+# references below) so it can scrape buyer-api's /metrics directly over
+# their internal port 8000 -- see observability/prometheus.yml. This is why
+# Prometheus needs no networking workaround the way Jenkins did: it's the
+# one reaching *into* those networks as a normal client, not trying to see
+# ports published on the host from a separate network namespace.
 services:
   loki:
     image: grafana/loki:2.9.6
@@ -25,19 +32,45 @@ services:
       - "127.0.0.1:3100:3100"
     restart: unless-stopped
 
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    networks:
+      - default
+      - buyerapi-staging
+      - buyerapi-prod
+    restart: unless-stopped
+
   grafana:
     image: grafana/grafana:11.1.0
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
     volumes:
       - ./observability/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/loki.yaml:ro
+      - ./observability/grafana-datasources-prometheus.yaml:/etc/grafana/provisioning/datasources/prometheus.yaml:ro
+      - ./observability/grafana-dashboards.yaml:/etc/grafana/provisioning/dashboards/dashboards.yaml:ro
+      - ./observability/dashboards:/var/lib/grafana/dashboards:ro
       - grafana_data:/var/lib/grafana
     ports:
       - "3000:3000"
     depends_on:
       - loki
+      - prometheus
     restart: unless-stopped
+
+networks:
+  buyerapi-staging:
+    external: true
+    name: buyerapi-staging_default
+  buyerapi-prod:
+    external: true
+    name: buyerapi-prod_default
 
 volumes:
   loki_data:
   grafana_data:
+  prometheus_data:

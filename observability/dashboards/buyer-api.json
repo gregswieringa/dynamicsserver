@@ -1,0 +1,68 @@
+{
+  "title": "buyer-api",
+  "uid": "buyer-api",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Total API requests/sec (by environment)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(http_requests_total[1m])) by (environment)",
+          "legendFormat": "{{environment}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "GET requests/sec (by environment)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(http_requests_total{method=\"GET\"}[1m])) by (environment)",
+          "legendFormat": "{{environment}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "POST requests/sec (by environment)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(http_requests_total{method=\"POST\"}[1m])) by (environment)",
+          "legendFormat": "{{environment}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "p95 request duration by operation",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, handler, environment))",
+          "legendFormat": "{{environment}} {{handler}}"
+        }
+      ]
+    }
+  ]
+}

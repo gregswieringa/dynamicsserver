@@ -1,0 +1,19 @@
+# Scrapes buyer-api's /metrics (added via prometheus-fastapi-instrumentator
+# in services/buyer-api/app/main.py) directly from staging's and prod's
+# containers over their own internal port 8000 -- not the host-published
+# 8081/8082 -- via the external network references in
+# docker-compose.observability.yml. The `environment` label is what lets
+# one Grafana dashboard show staging and prod side by side or filtered.
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: buyer-api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["buyerapi-staging-buyer-api-1:8000"]
+        labels:
+          environment: staging
+      - targets: ["buyerapi-prod-buyer-api-1:8000"]
+        labels:
+          environment: prod

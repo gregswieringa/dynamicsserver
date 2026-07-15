@@ -1,9 +1,11 @@
 # Provisioned automatically on Grafana startup -- no manual "add data
-# source" click-through needed.
+# source" click-through needed. uid is fixed so dashboards/grafana-dashboards.yaml
+# can reference it directly rather than relying on name-based lookup.
 apiVersion: 1
 
 datasources:
   - name: Loki
+    uid: loki
     type: loki
     access: proxy
     url: http://loki:3100
