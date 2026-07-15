@@ -1,0 +1,43 @@
+# Centralized logging: Loki stores/indexes logs shipped by every other
+# container's `loki` logging driver (see docker-compose.staging.yml /
+# .prod.yml / .jenkins.yml); Grafana is the query UI (LogQL) since Loki has
+# no UI of its own. Standalone compose file, same convention as
+# docker-compose.jenkins.yml -- run via
+# `docker compose -f docker-compose.observability.yml up -d`.
+#
+# One-time host setup this assumes (see CLAUDE.md): the Docker Loki logging
+# driver plugin installed on this VM's daemon
+# (`docker plugin install grafana/loki-docker-driver:latest --alias loki
+# --grant-all-permissions`), and deploy/observability.env populated (copy
+# deploy/observability.env.example, fill in a real Grafana admin password).
+#
+# Loki is loopback-only (127.0.0.1:3100) -- only this host's own containers
+# ship logs to it, no reason to expose it publicly. Grafana is the one
+# meant to be browsed directly.
+services:
+  loki:
+    image: grafana/loki:2.9.6
+    command: -config.file=/etc/loki/loki-config.yaml
+    volumes:
+      - ./observability/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+      - loki_data:/loki
+    ports:
+      - "127.0.0.1:3100:3100"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+    volumes:
+      - ./observability/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/loki.yaml:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+volumes:
+  loki_data:
+  grafana_data:

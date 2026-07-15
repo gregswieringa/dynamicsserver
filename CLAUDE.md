@@ -147,13 +147,56 @@ mounts a separate persistent `deploy_env` volume at `/var/jenkins_home/deploy-en
 points `DEPLOY_ENV_DIR` there. Populate that volume once, by hand (e.g. `docker compose cp` the real
 files in, or exec into the Jenkins container and write them), after Jenkins is first stood up.
 
-**One-time Jenkins/VM setup this assumes** (not yet done — this is the next step now that the Oracle VM
-exists): install Docker on the VM; find its docker group GID (`getent group docker`) and build Jenkins
-with `DOCKER_GID=<that value> docker compose -f docker-compose.jenkins.yml up -d --build`; populate the
-`deploy_env` volume with real `staging.env`/`prod.env`; create the Jenkins `ghcr-credentials` credential
-(a GitHub username + PAT with `write:packages`); create the Multibranch Pipeline job pointed at this
-repo; add a GitHub webhook pointed at Jenkins; and add branch protection on `main` requiring the Jenkins
-PR check to pass.
+**Where this actually runs** — Oracle's A1.Flex free tier never had capacity available after repeated
+attempts, so the VM is a Hetzner CX-tier instance instead (still cheap, comfortably in budget, and
+without the free-tier capacity roulette). Jenkins needs `network_mode: host` in
+`docker-compose.jenkins.yml`, not just the docker.sock mount — without it, Jenkins has its own network
+namespace, and a Jenkinsfile stage's `curl localhost:<port>` can't see ports the *host* Docker daemon
+published for sibling containers (confirmed directly: identical curl succeeded from the VM's shell,
+failed from inside the default-networked Jenkins container, succeeded again after switching to host
+networking).
+
+**Done**: Docker + the Jenkins container running on the VM; `deploy_env` volume populated with real
+`staging.env`/`prod.env`; the `ghcr-credentials` Jenkins credential; the Multibranch Pipeline job; a
+GitHub webhook (`http://<vm-ip>:8080/github-webhook/`, with a shared secret) so pushes trigger builds
+automatically instead of relying on manual scans. **Deliberately not done**: branch protection / required
+PR checks on `main` — direct pushes to `main` are fine for now, revisit if this ever needs to look more
+like a team workflow.
+
+### Observability (Loki + Grafana)
+
+Pulling the logging half of phase 5 forward early, same reasoning as pulling CI/CD forward from phase 6:
+a `docker-compose.observability.yml` runs Loki + Grafana on the same VM as Jenkins/staging/prod.
+
+**Why Loki over something like Humio/LogScale** — this VM is already tight on RAM (Jenkins alone runs
+~600MB just for its JVM, with staging+prod's containers on top). Loki only indexes labels, not full text,
+which is what makes it cheap enough to run alongside everything else already competing for that RAM.
+It's also free/open-source with no ingest-based cost model to worry about against the $50/month ceiling,
+and it's the log store this project's own roadmap already named for phase 5 — not a detour.
+
+**How logs get there** — `docker-compose.staging.yml`, `.prod.yml`, and `.jenkins.yml` set
+`logging: driver: loki` on each service, pointed at `http://127.0.0.1:3100/loki/api/v1/push`. This is
+*not* the same DooD networking trap Jenkins hit: Docker's logging driver runs inside the daemon process
+itself (not inside any container's network namespace), so `127.0.0.1` here genuinely is the VM host
+regardless of which container emitted the log — verified directly (pushed logs via a plain container
+with `--log-driver=loki`, confirmed they showed up in Loki queryable by `container_name`, before wiring
+it into the real compose files). `dev`/`test` deliberately do **not** get this — those stacks are meant
+to run anywhere (a laptop, this Codespace), and hardcoding a VM-specific Loki URL into them would silently
+break portability; `docker compose logs` already serves local dev fine.
+
+**Retention** — capped at 7 days (`observability/loki-config.yaml`'s `limits_config.retention_period`) to
+keep disk bounded automatically on a small VM; this is a learning-lab log store, not a compliance archive.
+
+**Querying** — Grafana (port 3000, provisioned with the Loki data source automatically via
+`observability/grafana-datasources.yaml`, no manual setup) is the query UI; Loki has none of its own.
+Every shipped log line is automatically labeled with `compose_project`/`compose_service`/`container_name`,
+so e.g. `{compose_project="buyerapi-prod"}` in Grafana's Explore view shows everything from prod.
+
+**One-time VM setup this assumes**: the Loki Docker logging driver plugin installed on the VM's daemon
+(`docker plugin install grafana/loki-docker-driver:latest --alias loki --grant-all-permissions`) before
+any service using `logging: driver: loki` can start; `deploy/observability.env` populated (copy
+`deploy/observability.env.example`, fill in a real Grafana admin password); a Hetzner Cloud Firewall rule
+for TCP 3000 (Grafana's UI) — Loki's own port (3100) stays loopback-only, nothing external needs it.
 
 ### Exposing a service to external tools (Postman, etc.) from this Codespace
 
@@ -179,8 +222,11 @@ docker-compose.test.yml        # CI/local integration-test stack (builds db/ + s
 docker-compose.staging.yml     # staging deploy target (pulls built images)
 docker-compose.prod.yml        # production deploy target (pulls the same tags staging ran)
 docker-compose.jenkins.yml     # Jenkins-as-a-container, driving the host's Docker daemon
+docker-compose.observability.yml  # Loki + Grafana (centralized logs)
 jenkins/Dockerfile              # Jenkins image: docker CLI + compose plugin + python3
-deploy/*.env.example           # templates for the real (gitignored) deploy/staging.env, deploy/prod.env
+observability/loki-config.yaml  # single-node Loki, filesystem storage, 7-day retention
+observability/grafana-datasources.yaml  # auto-provisions Grafana's Loki data source
+deploy/*.env.example           # templates for the real (gitignored) deploy/*.env files
 scripts/integration-test.sh    # builds + runs tests/integration/ against docker-compose.test.yml
 scripts/deploy.sh              # deploys built tags to staging or prod
 Jenkinsfile                    # Multibranch Pipeline: test on every branch, deploy on main

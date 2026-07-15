@@ -5,6 +5,13 @@
 # not on a dev machine. Ports/credentials/tag come from deploy/staging.env
 # (copy deploy/staging.env.example there and fill in real values — never
 # commit the real file).
+#
+# logging: driver: loki ships every container's stdout/stderr to the Loki
+# instance in docker-compose.observability.yml, over the host's loopback
+# (127.0.0.1:3100 -- this is the actual VM host, not a container namespace,
+# since Docker's logging driver runs in the daemon process itself, unlike
+# the DooD networking gotcha Jenkins hit). Requires the loki-docker-driver
+# plugin installed once on this VM (see CLAUDE.md).
 services:
   postgres:
     image: ghcr.io/gregswieringa/buyer-api-postgres:${IMAGE_TAG}
@@ -22,6 +29,12 @@ services:
       timeout: 3s
       retries: 10
     restart: unless-stopped
+    logging:
+      driver: loki
+      options:
+        loki-url: "http://127.0.0.1:3100/loki/api/v1/push"
+        loki-retries: "3"
+        loki-batch-size: "400"
 
   buyer-api:
     image: ghcr.io/gregswieringa/buyer-api:${IMAGE_TAG}
@@ -33,6 +46,12 @@ services:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+    logging:
+      driver: loki
+      options:
+        loki-url: "http://127.0.0.1:3100/loki/api/v1/push"
+        loki-retries: "3"
+        loki-batch-size: "400"
 
 volumes:
   pgdata:

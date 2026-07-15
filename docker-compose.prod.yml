@@ -20,6 +20,12 @@ services:
       timeout: 3s
       retries: 10
     restart: unless-stopped
+    logging:
+      driver: loki
+      options:
+        loki-url: "http://127.0.0.1:3100/loki/api/v1/push"
+        loki-retries: "3"
+        loki-batch-size: "400"
 
   buyer-api:
     image: ghcr.io/gregswieringa/buyer-api:${IMAGE_TAG}
@@ -31,6 +37,12 @@ services:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+    logging:
+      driver: loki
+      options:
+        loki-url: "http://127.0.0.1:3100/loki/api/v1/push"
+        loki-retries: "3"
+        loki-batch-size: "400"
 
 volumes:
   pgdata:

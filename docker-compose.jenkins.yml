@@ -34,6 +34,14 @@ services:
       - deploy_env:/var/jenkins_home/deploy-env
       - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
+    # Reaches the real VM host's loopback here (network_mode: host above),
+    # not a private container namespace -- see docker-compose.observability.yml.
+    logging:
+      driver: loki
+      options:
+        loki-url: "http://127.0.0.1:3100/loki/api/v1/push"
+        loki-retries: "3"
+        loki-batch-size: "400"
 
 volumes:
   jenkins_home:
