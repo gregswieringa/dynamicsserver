@@ -1,0 +1,4 @@
+# Installed on the VM at /etc/cron.d/traffic-sim (cp this file there).
+# Runs scripts/simulate-traffic.py once a minute against production.
+# flock prevents overlapping runs if one invocation ever runs long.
+* * * * * root /usr/bin/flock -n /var/lib/traffic-sim/run.lock /usr/bin/python3 /opt/dynamicsserver/scripts/simulate-traffic.py --base-url http://localhost:8082 --state-file /var/lib/traffic-sim/state.json >> /var/log/traffic-sim.log 2>&1

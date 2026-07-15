@@ -198,6 +198,34 @@ any service using `logging: driver: loki` can start; `deploy/observability.env` 
 `deploy/observability.env.example`, fill in a real Grafana admin password); a Hetzner Cloud Firewall rule
 for TCP 3000 (Grafana's UI) — Loki's own port (3100) stays loopback-only, nothing external needs it.
 
+### Simulated production traffic
+
+`scripts/simulate-traffic.py` fires realistic-mix requests at **production** (not staging -- staging is
+where a developer would go to verify their own work or run an actual load test; this is meant to make
+prod look like a real system with real usage, not to load-test anything). Stdlib-only Python, deliberately
+-- it runs directly on the VM host via cron (`/etc/cron.d/traffic-sim`, installed from
+`deploy/traffic-sim.cron`; log rotation from `deploy/traffic-sim.logrotate`), not in a container, so there's
+nothing to pip install.
+
+**Traffic model**: a pool of user IDs persists between runs in a small JSON state file
+(`/var/lib/traffic-sim/state.json`). GETs and MODIFYs (PATCH) pick a random *existing* user from that pool
+-- simulating people logging into accounts that already exist, not creating a fresh one every request.
+CREATE is the rare case, matching "~once per user, ever," and slowly grows the pool over time. Default mix
+is 70% GET / 20% MODIFY / 10% CREATE.
+
+**Why not k6** (named in the roadmap for phase 7): k6 is for load/stress testing -- many concurrent VUs
+hammering the system to find its breaking point. This is the opposite: realistic single-user-at-a-time
+pacing with a specific daily rhythm. A tiny stdlib script makes the weighting and time-of-day curve simple,
+readable, tunable code, with a negligible resource footprint on a VM that's already tight on RAM. k6 is
+still the right tool when actually load-testing later.
+
+**Diurnal curve**: `rate_at()` piecewise-linearly interpolates between (hour, requests-per-minute) control
+points in US/Eastern time -- flat low overnight, ramps up 6-8am, flat peak through the day, ramps down
+20-24h. Each cron tick computes the target rate for *that* minute (plus ±20% jitter) and paces that many
+requests across the minute, rather than firing them all at once.
+
+To disable: remove `/etc/cron.d/traffic-sim` on the VM.
+
 ### Exposing a service to external tools (Postman, etc.) from this Codespace
 
 Ports default to `private` (requires a browser-authenticated GitHub session, which tools like Postman can't

@@ -1,0 +1,9 @@
+# Installed on the VM at /etc/logrotate.d/traffic-sim (cp this file there).
+# One line per minute forever, otherwise -- keep it bounded.
+/var/log/traffic-sim.log {
+    weekly
+    rotate 4
+    compress
+    missingok
+    notifempty
+}
