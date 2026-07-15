@@ -187,7 +187,9 @@ break portability; `docker compose logs` already serves local dev fine.
 **Retention** — capped at 7 days (`observability/loki-config.yaml`'s `limits_config.retention_period`) to
 keep disk bounded automatically on a small VM; this is a learning-lab log store, not a compliance archive.
 
-**Querying** — Grafana (port 3000, provisioned with the Loki data source automatically via
+**Querying** — Grafana (port 8083 -- not Grafana's default 3000, which some networks silently block as a
+common dev-server port, confirmed directly when a user's home network timed out on 3000 but reached it
+fine over cellular data; provisioned with the Loki data source automatically via
 `observability/grafana-datasources.yaml`, no manual setup) is the query UI; Loki has none of its own.
 Every shipped log line is automatically labeled with `compose_project`/`compose_service`/`container_name`,
 so e.g. `{compose_project="buyerapi-prod"}` in Grafana's Explore view shows everything from prod.
@@ -196,7 +198,7 @@ so e.g. `{compose_project="buyerapi-prod"}` in Grafana's Explore view shows ever
 (`docker plugin install grafana/loki-docker-driver:latest --alias loki --grant-all-permissions`) before
 any service using `logging: driver: loki` can start; `deploy/observability.env` populated (copy
 `deploy/observability.env.example`, fill in a real Grafana admin password); a Hetzner Cloud Firewall rule
-for TCP 3000 (Grafana's UI) — Loki's and Prometheus's own ports (3100, 9090) stay loopback-only, nothing
+for TCP 8083 (Grafana's UI) — Loki's and Prometheus's own ports (3100, 9090) stay loopback-only, nothing
 external needs them directly.
 
 **Metrics** — `services/buyer-api/app/main.py` wires up `prometheus-fastapi-instrumentator`, which exposes

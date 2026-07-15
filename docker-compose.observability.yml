@@ -56,7 +56,12 @@ services:
       - ./observability/dashboards:/var/lib/grafana/dashboards:ro
       - grafana_data:/var/lib/grafana
     ports:
-      - "3000:3000"
+      # 8083, not Grafana's default 3000: some networks silently block
+      # outbound to port 3000 (a common dev-server port), confirmed
+      # directly when a user's home network timed out on 3000 but reached
+      # it fine over cellular data. 8083 sits in the already-open range
+      # (8080 Jenkins, 8081 staging, 8082 prod).
+      - "8083:3000"
     depends_on:
       - loki
       - prometheus
