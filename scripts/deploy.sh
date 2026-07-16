@@ -48,6 +48,13 @@ healthy=false
 # See scripts/integration-test.sh's comment on this same loop -- a small
 # resource-constrained VM can genuinely take longer than 30s for Postgres
 # initdb + schema load + buyer-api startup.
+#
+# In prod, this port is Traefik's, not buyer-api's directly (see
+# docker-compose.prod.yml's 4 replicas) -- so "healthy" here means "at
+# least one of the instances responded," not "all of them are up." Traefik's
+# own per-backend healthcheck (via labels in that file) is what actually
+# keeps it from routing to a replica that isn't ready yet; this loop is
+# just an external, black-box confirmation that *something* is serving.
 for _ in $(seq 1 60); do
   if curl -sf "http://localhost:${BUYER_API_PORT}/health" >/dev/null 2>&1; then
     healthy=true

@@ -4,6 +4,16 @@
 # 8081/8082 -- via the external network references in
 # docker-compose.observability.yml. The `environment` label is what lets
 # one Grafana dashboard show staging and prod side by side or filtered.
+#
+# prod has 4 static targets, not 1: docker-compose.prod.yml scales buyer-api
+# to 4 replicas (fronted by Traefik) to model multiple API instances behind
+# a single entry point. Static list chosen over Prometheus's own Docker
+# service discovery (docker_sd_configs) since the fleet is small and fixed
+# (not autoscaling) and this avoids giving Prometheus docker.sock access
+# too. If a replica's numeric suffix ever doesn't come back the same way
+# after a manual scale-down/up, that target just shows "down" on
+# Prometheus's targets page -- not fatal, but worth checking there rather
+# than assuming it self-heals.
 global:
   scrape_interval: 15s
 
@@ -14,6 +24,10 @@ scrape_configs:
       - targets: ["buyerapi-staging-buyer-api-1:8000"]
         labels:
           environment: staging
-      - targets: ["buyerapi-prod-buyer-api-1:8000"]
+      - targets:
+          - "buyerapi-prod-buyer-api-1:8000"
+          - "buyerapi-prod-buyer-api-2:8000"
+          - "buyerapi-prod-buyer-api-3:8000"
+          - "buyerapi-prod-buyer-api-4:8000"
         labels:
           environment: prod

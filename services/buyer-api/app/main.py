@@ -1,4 +1,6 @@
-from fastapi import FastAPI
+import socket
+
+from fastapi import FastAPI, Request
 from prometheus_fastapi_instrumentator import Instrumentator
 from sqlalchemy import text
 
@@ -14,6 +16,19 @@ app.include_router(addresses.router)
 # queries it for per-operation latency percentiles). Scraped by Prometheus
 # in docker-compose.observability.yml, not used in dev/test.
 Instrumentator().instrument(app).expose(app)
+
+# Docker sets a container's hostname to its own short container ID by
+# default, so this is a distinct value per replica with no extra compose
+# config -- lets you watch which of prod's 4 instances answered a given
+# request straight from Postman/curl.
+_INSTANCE_ID = socket.gethostname()
+
+
+@app.middleware("http")
+async def add_instance_id_header(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Instance-Id"] = _INSTANCE_ID
+    return response
 
 
 @app.get("/health")

@@ -116,7 +116,7 @@ networks/volumes, same as `docker-compose.test.yml` already does for CI:
 | dev         | `docker-compose.yml`           | 5432                | 8000            | builds from source, `--reload` |
 | test (CI)   | `docker-compose.test.yml`      | 5433                | 8001            | builds from `db/` + `services/buyer-api`, tmpfs DB |
 | staging     | `docker-compose.staging.yml`   | 5434 (loopback only)| 8081            | pulls `ghcr.io/gregswieringa/buyer-api(-postgres):<tag>` |
-| production  | `docker-compose.prod.yml`      | 5435 (loopback only)| 8082            | pulls the same tag staging ran |
+| production  | `docker-compose.prod.yml`      | 5435 (loopback only)| 8082 (Traefik, fronting 4 buyer-api replicas) | pulls the same tag staging ran |
 
 Postgres in staging/prod is bound to `127.0.0.1` only — buyer-api reaches it over the Compose network,
 but it's never exposed on the VM's public IP.
@@ -163,6 +163,65 @@ automatically instead of relying on manual scans. **Deliberately not done**: bra
 PR checks on `main` — direct pushes to `main` are fine for now, revisit if this ever needs to look more
 like a team workflow.
 
+### Load-balanced production tier (Traefik)
+
+Models the next layer of a real topology — a BFF routing through a single entry point to multiple API
+instances, not one instance directly — scoped to **production only**. Staging stays single-instance on
+purpose: it's where a developer verifies their own work, not where this topology needs modeling.
+
+`docker-compose.prod.yml` scales `buyer-api` to `deploy: replicas: 4` and adds a `traefik` service that
+takes over the host-published `${BUYER_API_PORT}` (8082) — the 4 replicas no longer publish a host port
+directly (they can't all bind the same one), so Traefik is now the only thing exposed to the internet
+for prod, same port/firewall rule as before.
+
+**Why Traefik over nginx/HAProxy** — Traefik's Docker provider auto-discovers every replica of a scaled
+Compose service via the Docker API directly (not DNS round-robin) and load-balances across them with zero
+static upstream list to keep in sync. nginx/HAProxy would need either a hand-maintained list of the
+numbered replica container names or dynamic-DNS-resolution config to get the same effect. Its dashboard
+also has real pedagogical value here — seeing the 4 registered backends and their health directly.
+
+**Why this needs no DooD-style networking workaround** — Traefik lives *inside* `docker-compose.prod.yml`,
+so it shares `buyerapi-prod_default` with the buyer-api replicas automatically. Unlike Jenkins (which
+needed `network_mode: host`) or Prometheus (which needed external network references to reach *into*
+staging's/prod's networks from a separate project), Traefik and its backends are in the same
+project/network from the start — the simplest networking case of anything added to this VM.
+
+**Config**: Docker-label-based dynamic config on the `buyer-api` service (`traefik.enable=true`, a router
+rule, `loadbalancer.server.port=8000`, and Traefik's own active healthcheck against `/health` so it stops
+routing to a replica that isn't ready yet during a rollout — independent of whatever `scripts/deploy.sh`
+observes externally). The router rule is `PathPrefix(\`/\`)`, deliberately not `Host(...)` — Postman/curl
+hit this VM by raw IP, not a domain, so a Host-based rule would never match and everything would 404 at
+Traefik itself. Static config (`--providers.docker.exposedByDefault=false` plus the entrypoint/access log)
+is passed via `command:` args, no separate mounted file. `exposedByDefault=false` matters: without it,
+Traefik's Docker provider watches *every* container on the host daemon — Jenkins, Grafana, Loki, staging's
+buyer-api — not just prod's, since it talks to `/var/run/docker.sock` directly rather than being scoped to
+one Compose project.
+
+**Traefik image is pinned to `v3.6+`, not just any v3 tag** — Docker 29 raised the daemon's minimum
+supported API version to 1.44; Traefik versions before 3.6.1 hardcode an old client version (1.24) that
+a Docker-29-era daemon now rejects outright. The failure is silent-looking: Traefik logs a retrying
+"client version too old" error but otherwise appears to start fine, while actually discovering zero
+containers (confirmed directly — its own `/api/http/routers` endpoint showed only Traefik's internal
+routers, nothing from the `buyer-api` label, until bumping to v3.6). Setting `DOCKER_API_VERSION` as an
+env var does **not** work around it (tried, confirmed ineffective) — only the Traefik-side fix does.
+This affects both this VM and the dev Codespace identically, since Docker 29 raised the restriction
+daemon-side, not per-environment.
+
+**Accepted risk, not mitigated**: the `docker.sock` mount is `:ro`, but that flag only blocks writes to the
+socket file itself, not the Docker API surface reachable through it — same class of tradeoff already
+accepted for Jenkins' and Prometheus' own docker.sock access, just worth stating plainly rather than
+letting `:ro` imply a sandbox that isn't really there.
+
+**`scripts/deploy.sh`'s health check changes meaning, silently** — its `curl localhost:${BUYER_API_PORT}/health`
+now hits Traefik, which forwards to *whichever one backend responds*, so "healthy" means "at least one of
+four instances is up," not "the instance is up." Traefik's own per-backend healthcheck (above) is what
+actually protects against routing to a not-ready replica during a rollout.
+
+**`X-Instance-Id` response header** (`services/buyer-api/app/main.py`) — every response carries the
+container's own hostname (Docker's default per-container hostname is its short container ID, unique per
+replica with no extra compose config), so you can watch which of the 4 instances answered a given request
+directly from Postman/curl.
+
 ### Observability (Loki + Prometheus + Grafana)
 
 Pulling the logging half of phase 5 forward early, same reasoning as pulling CI/CD forward from phase 6:
@@ -205,16 +264,20 @@ external needs them directly.
 `/metrics` with zero manual timing code in `routers/`: `http_requests_total{method,handler,status}` (a
 counter) and `http_request_duration_seconds{method,handler}` (a histogram, queried via
 `histogram_quantile()` for per-operation latency percentiles). `observability/prometheus.yml` scrapes it
-directly from staging's and prod's containers over their internal port 8000 (`buyerapi-staging-buyer-api-1:8000`,
-`buyerapi-prod-buyer-api-1:8000`), not the host-published 8081/8082 — this is why Prometheus needs no
-networking workaround the way Jenkins did: `docker-compose.observability.yml` joins Prometheus directly to
-staging's and prod's own Compose networks (external network references), so it's a normal client reaching
-*into* those networks rather than a separate container trying to see host-published ports across a network
-namespace boundary. The `environment` label on each scrape target (`staging`/`prod`) is what lets one
-Grafana dashboard (auto-provisioned from `observability/dashboards/buyer-api.json`, no manual import) show
-both side by side or filtered. Chose a custom instrumentator over deriving counts from Loki log lines —
-Loki was never designed for latency percentiles/histograms, and Prometheus is what this project's own
-roadmap already names for phase 5 alongside Loki.
+directly from staging's and prod's containers over their internal port 8000, not the host-published
+8081/8082 — this is why Prometheus needs no networking workaround the way Jenkins did:
+`docker-compose.observability.yml` joins Prometheus directly to staging's and prod's own Compose networks
+(external network references), so it's a normal client reaching *into* those networks rather than a
+separate container trying to see host-published ports across a network namespace boundary. Staging has one
+scrape target (`buyerapi-staging-buyer-api-1:8000`); prod has four (`buyerapi-prod-buyer-api-1` through
+`-4`, all port 8000), one per replica behind Traefik — see "Load-balanced production tier" above. The
+`environment` label on each scrape target (`staging`/`prod`) is what lets one Grafana dashboard
+(auto-provisioned from `observability/dashboards/buyer-api.json`, no manual import) show both side by side
+or filtered; two of its panels additionally break prod down `by (instance)` (request rate and p95 latency)
+so a lagging or overloaded replica is visible directly rather than averaged away. Chose a custom
+instrumentator over deriving counts from Loki log lines — Loki was never designed for latency
+percentiles/histograms, and Prometheus is what this project's own roadmap already names for phase 5
+alongside Loki.
 
 Unlike the logging setup, this touches **application code** (`main.py`, `requirements.txt`), so it can't be
 hand-applied to the VM the way Loki/Grafana were — it goes through the real pipeline (unit tests,
