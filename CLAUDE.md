@@ -292,11 +292,17 @@ prod look like a real system with real usage, not to load-test anything). Stdlib
 `deploy/traffic-sim.cron`; log rotation from `deploy/traffic-sim.logrotate`), not in a container, so there's
 nothing to pip install.
 
-**Traffic model**: a pool of user IDs persists between runs in a small JSON state file
-(`/var/lib/traffic-sim/state.json`). GETs and MODIFYs (PATCH) pick a random *existing* user from that pool
--- simulating people logging into accounts that already exist, not creating a fresh one every request.
-CREATE is the rare case, matching "~once per user, ever," and slowly grows the pool over time. Default mix
-is 70% GET / 20% MODIFY / 10% CREATE.
+**Traffic model**: a pool of user IDs, plus each user's known address IDs, persists between runs in a
+small JSON state file (`/var/lib/traffic-sim/state.json`). GETs and MODIFYs (PATCH) pick a random
+*existing* user from that pool -- simulating people logging into accounts that already exist, not
+creating a fresh one every request. User CREATE is the rare case, matching "~once per user, ever," and
+slowly grows the pool over time. Address CREATE has no equivalent forced bootstrap -- an empty address
+book is a realistic state for a fresh signup, so that pool just grows organically as the
+`address_create` action fires. Default mix is 55% GET / 15% user MODIFY / 5% user CREATE / 10% address
+CREATE / 15% address MODIFY. The state file's format changed from a flat JSON array of user IDs to
+`{"users": [...], "addresses": {user_id: [address_id, ...]}}` when address tracking was added;
+`load_state()` migrates the old array format transparently so the already-running state file on the VM
+didn't need manual conversion.
 
 **Why not k6** (named in the roadmap for phase 7): k6 is for load/stress testing -- many concurrent VUs
 hammering the system to find its breaking point. This is the opposite: realistic single-user-at-a-time

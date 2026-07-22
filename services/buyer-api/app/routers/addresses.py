@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.models import Address, User
-from app.schemas import AddressCreate, AddressOut
+from app.schemas import AddressCreate, AddressOut, AddressUpdate
 
 router = APIRouter(prefix="/users/{user_id}/addresses", tags=["addresses"])
 
@@ -49,6 +49,23 @@ async def list_addresses(user_id: uuid.UUID, db: AsyncSession = Depends(get_db))
         select(Address).where(Address.user_id == user_id).order_by(Address.created_at)
     )
     return list(result.scalars().all())
+
+
+@router.patch("/{address_id}", response_model=AddressOut)
+async def update_address(
+    user_id: uuid.UUID, address_id: uuid.UUID, payload: AddressUpdate, db: AsyncSession = Depends(get_db)
+) -> Address:
+    await _get_user_or_404(user_id, db)
+    address = await db.get(Address, address_id)
+    if address is None or address.user_id != user_id:
+        raise HTTPException(status_code=404, detail="address not found")
+
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(address, field, value)
+
+    await db.commit()
+    await db.refresh(address)
+    return address
 
 
 @router.post("/{address_id}/set-default", response_model=AddressOut)

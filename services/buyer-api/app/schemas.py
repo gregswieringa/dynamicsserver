@@ -78,6 +78,21 @@ class AddressCreate(BaseModel):
     is_default: bool = False
 
 
+class AddressUpdate(BaseModel):
+    # is_default deliberately excluded -- changing it has to go through
+    # set_default_address's clear-old-default logic (routers/addresses.py),
+    # not a plain field assignment, or it could violate the
+    # one_default_address_per_user partial unique index.
+    kind: Literal["shipping", "billing", "both"] | None = None
+    recipient_name: str | None = None
+    line1: str | None = None
+    line2: str | None = None
+    city: str | None = None
+    region: str | None = None
+    postal_code: str | None = None
+    country: str | None = None
+
+
 class AddressOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

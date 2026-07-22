@@ -138,3 +138,81 @@ def test_set_default_address_success(client: TestClient) -> None:
 
     user_after = client.get(f"/users/{user['id']}").json()
     assert user_after["default_shipping_address_id"] == second["id"]
+
+
+def test_update_address_user_not_found(client: TestClient) -> None:
+    resp = client.patch(
+        f"/users/{uuid.uuid4()}/addresses/{uuid.uuid4()}", json={"city": "Metropolis"}
+    )
+
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "user not found"
+
+
+def test_update_address_address_not_found(client: TestClient) -> None:
+    user = _create_user(client)
+
+    resp = client.patch(
+        f"/users/{user['id']}/addresses/{uuid.uuid4()}", json={"city": "Metropolis"}
+    )
+
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "address not found"
+
+
+def test_update_address_belonging_to_other_user(client: TestClient) -> None:
+    user1 = _create_user(client)
+    user2 = _create_user(client, email="other@example.com")
+    other_address = client.post(
+        f"/users/{user2['id']}/addresses", json=_address_payload()
+    ).json()
+
+    resp = client.patch(
+        f"/users/{user1['id']}/addresses/{other_address['id']}", json={"city": "Metropolis"}
+    )
+
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "address not found"
+
+
+def test_update_address_partial(client: TestClient) -> None:
+    user = _create_user(client)
+    address = client.post(f"/users/{user['id']}/addresses", json=_address_payload()).json()
+
+    resp = client.patch(
+        f"/users/{user['id']}/addresses/{address['id']}",
+        json={"city": "Metropolis", "postal_code": "54321"},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["city"] == "Metropolis"
+    assert body["postal_code"] == "54321"
+    # untouched fields keep their original values
+    assert body["recipient_name"] == address["recipient_name"]
+    assert body["line1"] == address["line1"]
+
+
+def test_update_address_empty_payload_is_noop(client: TestClient) -> None:
+    user = _create_user(client)
+    address = client.post(f"/users/{user['id']}/addresses", json=_address_payload()).json()
+
+    resp = client.patch(f"/users/{user['id']}/addresses/{address['id']}", json={})
+
+    assert resp.status_code == 200
+    assert resp.json()["city"] == address["city"]
+
+
+def test_update_address_cannot_set_is_default_directly(client: TestClient) -> None:
+    user = _create_user(client)
+    address = client.post(f"/users/{user['id']}/addresses", json=_address_payload()).json()
+
+    # is_default isn't part of AddressUpdate's schema, so it's silently
+    # ignored here rather than accepted -- changing the default has to go
+    # through set_default_address's clear-old-default logic instead.
+    resp = client.patch(
+        f"/users/{user['id']}/addresses/{address['id']}", json={"is_default": True}
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["is_default"] is False

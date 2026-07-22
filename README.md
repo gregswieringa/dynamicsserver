@@ -24,7 +24,7 @@ API docs (Swagger UI) at `localhost:8000/docs` once running.
 
 Endpoints:
 - `POST /users`, `GET /users`, `GET /users/{id}`, `PATCH /users/{id}`
-- `POST /users/{id}/addresses`, `GET /users/{id}/addresses`, `POST /users/{id}/addresses/{address_id}/set-default`
+- `POST /users/{id}/addresses`, `GET /users/{id}/addresses`, `PATCH /users/{id}/addresses/{address_id}`, `POST /users/{id}/addresses/{address_id}/set-default`
 
 `payment_methods` exists in the schema but has no API yet — next up once checkout enters the picture.
 
